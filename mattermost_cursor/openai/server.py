@@ -1,0 +1,90 @@
+"""OpenAI-compatible HTTP API for mattermost-plugin-agents (port of openai/server.ts)."""
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+from aiohttp import web
+
+from ..util.server import ServerHandle, start_app
+from .chat_completions import handle_chat_completions
+from .sessions import OpenAISessionPool
+
+if TYPE_CHECKING:
+    from cursor_sdk import AsyncClient
+
+    from ..approval.manager import ApprovalManager
+    from ..config import AppEnv
+    from ..history.store import HistoryStore
+    from ..util.logger import Logger
+
+
+def _check_auth(request: web.Request, env: "AppEnv") -> bool:
+    required = (env.OPENAI_API_KEY or "").strip()
+    if not required:
+        return True
+    return request.headers.get("Authorization") == f"Bearer {required}"
+
+
+async def start_openai_api_server(
+    *,
+    env: "AppEnv",
+    log: "Logger",
+    approvals: "ApprovalManager",
+    history: "HistoryStore",
+    client: "AsyncClient",
+) -> ServerHandle:
+    sessions = OpenAISessionPool(env, log, client)
+
+    @web.middleware
+    async def auth_mw(request: web.Request, handler):
+        if not _check_auth(request, env):
+            return web.json_response({"error": {"message": "Invalid API key"}}, status=401)
+        return await handler(request)
+
+    async def health(_req: web.Request) -> web.Response:
+        return web.json_response({"status": "ok"})
+
+    async def models(_req: web.Request) -> web.Response:
+        return web.json_response(
+            {
+                "object": "list",
+                "data": [
+                    {
+                        "id": env.CURSOR_MODEL,
+                        "object": "model",
+                        "created": 0,
+                        "owned_by": "cursor",
+                    }
+                ],
+            }
+        )
+
+    async def chat(request: web.Request) -> web.StreamResponse:
+        try:
+            return await handle_chat_completions(
+                request,
+                env=env,
+                log=log,
+                sessions=sessions,
+                approvals=approvals,
+                history=history,
+            )
+        except Exception as e:
+            log.error("chat/completions failed", err=str(e))
+            return web.json_response({"error": {"message": str(e)}}, status=500)
+
+    app = web.Application(middlewares=[auth_mw])
+    app.router.add_get("/health", health)
+    app.router.add_get("/v1/health", health)
+    app.router.add_get("/models", models)
+    app.router.add_get("/v1/models", models)
+    app.router.add_post("/chat/completions", chat)
+    app.router.add_post("/v1/chat/completions", chat)
+
+    handle = await start_app(app, env.OPENAI_API_PORT)
+    log.info(
+        "OpenAI-compatible API listening (for mattermost-plugin-agents)",
+        port=env.OPENAI_API_PORT,
+        model=env.CURSOR_MODEL,
+    )
+    return handle

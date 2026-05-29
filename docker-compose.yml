@@ -1,0 +1,10 @@
+services:
+  mattermost-cursor-bot:
+    build: .
+    env_file:
+      - .env
+    restart: unless-stopped
+    ports:
+      - "${APPROVAL_HTTP_PORT:-3847}:${APPROVAL_HTTP_PORT:-3847}"
+      - "${OPENAI_API_PORT:-8080}:${OPENAI_API_PORT:-8080}"
+      - "${PANEL_PORT:-3850}:${PANEL_PORT:-3850}"
