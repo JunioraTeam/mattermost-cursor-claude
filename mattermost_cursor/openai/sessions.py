@@ -9,11 +9,9 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from ..cursor.create_agent import create_cursor_agent
+from ..provider import create_agent
 
 if TYPE_CHECKING:
-    from cursor_sdk import AsyncClient
-
     from ..config import AppEnv
     from ..util.logger import Logger
 
@@ -28,7 +26,7 @@ class Session:
 
 
 class OpenAISessionPool:
-    def __init__(self, env: "AppEnv", log: "Logger", client: "AsyncClient") -> None:
+    def __init__(self, env: "AppEnv", log: "Logger", client: Any) -> None:
         self._env = env
         self._log = log
         self._client = client
@@ -40,7 +38,7 @@ class OpenAISessionPool:
         if s:
             s.last_used = time.time() * 1000
             return s
-        agent, mcp_servers = await create_cursor_agent(self._env, self._log, self._client)
+        agent, mcp_servers = await create_agent(self._env, self._log, self._client)
         s = Session(agent=agent, mcp_servers=mcp_servers, last_used=time.time() * 1000)
         self._sessions[session_key] = s
         return s

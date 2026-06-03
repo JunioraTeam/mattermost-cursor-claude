@@ -11,7 +11,7 @@ from .approval.http_server import start_approval_http_server
 from .approval.manager import ApprovalManager
 from .bot.app import CursorMattermostBot
 from .config import load_env
-from .cursor.client import create_client
+from .provider import create_client
 from .history.store import HistoryStore
 from .mattermost.types import MattermostPost
 from .mattermost.websocket import MattermostWebSocket

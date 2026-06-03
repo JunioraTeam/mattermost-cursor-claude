@@ -44,7 +44,10 @@ class AppEnv(BaseSettings):
     MATTERMOST_ALLOWED_CHANNEL_IDS: str | None = None
     MATTERMOST_REQUIRE_MENTION: bool = True
 
-    CURSOR_API_KEY: str
+    # cursor — Cursor Python SDK; claude — Claude Agent SDK
+    AI_PROVIDER: Literal["cursor", "claude"] = "cursor"
+
+    CURSOR_API_KEY: str | None = None
     CURSOR_MODEL: str = "composer-2"
     CURSOR_RUNTIME: Literal["local", "cloud"] = "cloud"
     CURSOR_LOCAL_CWD: str | None = None
@@ -53,6 +56,22 @@ class AppEnv(BaseSettings):
     CURSOR_CLOUD_SKIP_REVIEWER_REQUEST: bool = True
     CURSOR_CLOUD_ENV_JSON: str | None = None
     CURSOR_AUTO_APPROVE_REQUESTS: bool = True
+
+    # Claude Agent SDK (https://code.claude.com/docs/en/agent-sdk/overview)
+    ANTHROPIC_API_KEY: str | None = None
+    CLAUDE_MODEL: str = "claude-sonnet-4-6"
+    CLAUDE_CWD: str | None = None
+    # default | acceptEdits | plan | bypassPermissions | dontAsk | auto
+    CLAUDE_PERMISSION_MODE: Literal[
+        "default", "acceptEdits", "plan", "bypassPermissions", "dontAsk", "auto"
+    ] = "acceptEdits"
+    # When true, build on the bundled claude_code system prompt and append
+    # CLAUDE_SYSTEM_PROMPT (if any). When false, CLAUDE_SYSTEM_PROMPT is used verbatim.
+    CLAUDE_SYSTEM_PROMPT_PRESET: bool = True
+    CLAUDE_SYSTEM_PROMPT: str | None = None
+    CLAUDE_MAX_TURNS: int | None = None
+    CLAUDE_ALLOWED_TOOLS: str | None = None
+    CLAUDE_DISALLOWED_TOOLS: str | None = None
 
     OPENAI_API_PORT: int = 8080
     OPENAI_API_KEY: str | None = None
@@ -107,6 +126,7 @@ class AppEnv(BaseSettings):
         "CURSOR_CLOUD_AUTO_CREATE_MR",
         "CURSOR_CLOUD_SKIP_REVIEWER_REQUEST",
         "CURSOR_AUTO_APPROVE_REQUESTS",
+        "CLAUDE_SYSTEM_PROMPT_PRESET",
         "MCP_MERGE_PRESETS",
         mode="before",
     )
@@ -127,12 +147,17 @@ class AppEnv(BaseSettings):
                     "MATTERMOST_BOT_TOKEN: MATTERMOST_BOT_TOKEN is required when "
                     "BOT_MODE is standalone or both"
                 )
-        repos = (self.CURSOR_CLOUD_REPOS_JSON or "").strip()
-        if self.CURSOR_RUNTIME == "cloud" and (not repos or repos == "[]"):
-            issues.append(
-                "CURSOR_CLOUD_REPOS_JSON: CURSOR_CLOUD_REPOS_JSON must include at least "
-                "one repo when CURSOR_RUNTIME=cloud"
-            )
+        if self.AI_PROVIDER == "cursor":
+            if not self.CURSOR_API_KEY:
+                issues.append(
+                    "CURSOR_API_KEY: CURSOR_API_KEY is required when AI_PROVIDER=cursor"
+                )
+            repos = (self.CURSOR_CLOUD_REPOS_JSON or "").strip()
+            if self.CURSOR_RUNTIME == "cloud" and (not repos or repos == "[]"):
+                issues.append(
+                    "CURSOR_CLOUD_REPOS_JSON: CURSOR_CLOUD_REPOS_JSON must include at least "
+                    "one repo when CURSOR_RUNTIME=cloud"
+                )
         if self.PANEL_PORT and self.PANEL_PORT > 0:
             if not (self.PANEL_USERNAME or "").strip():
                 issues.append("PANEL_USERNAME: PANEL_USERNAME is required when PANEL_PORT > 0")

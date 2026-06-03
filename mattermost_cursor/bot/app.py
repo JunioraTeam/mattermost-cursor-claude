@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from ..cursor.agent_runner import run_cursor_turn
-from ..cursor.create_agent import create_cursor_agent
 from ..mattermost.api import MattermostApi
 from ..mattermost.post_utils import (
     is_approval_token,
@@ -17,11 +16,10 @@ from ..mattermost.post_utils import (
 from ..mattermost.streaming_post import StreamingPost
 from ..mattermost.thread_context import build_user_message_with_thread_context
 from ..mattermost.types import MattermostPost
+from ..provider import create_agent
 from .thread_queue import QueuedRun, ThreadRunQueue, new_queue_id
 
 if TYPE_CHECKING:
-    from cursor_sdk import AsyncClient
-
     from ..approval.manager import ApprovalManager
     from ..config import AppEnv
     from ..history.store import HistoryStore
@@ -48,7 +46,7 @@ class CursorMattermostBot:
         log: "Logger",
         approvals: "ApprovalManager",
         history: "HistoryStore",
-        client: "AsyncClient",
+        client: Any,
     ) -> None:
         self._env = env
         self._log = log
@@ -384,7 +382,7 @@ class CursorMattermostBot:
         s = self._sessions.get(key)
         if s:
             return s
-        agent, mcp_servers = await create_cursor_agent(self._env, self._log, self._client)
+        agent, mcp_servers = await create_agent(self._env, self._log, self._client)
         s = ThreadSession(
             agent=agent,
             mcp_servers=mcp_servers,

@@ -1,10 +1,12 @@
-"""Runs one user turn, streaming Cursor SDK output to a sink (port of cursor/agent-runner.ts)."""
+"""Runs one user turn, streaming agent output to a sink (port of cursor/agent-runner.ts).
+
+Provider-neutral: works with any agent/run exposing ``send`` → ``messages()`` →
+``wait()`` (Cursor SDK or the Claude Agent SDK wrapper).
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
-
-from cursor_sdk import CursorAgentError
 
 from .agent_context import augment_user_message
 from .stream_sink import dispatch_stream_event
@@ -23,7 +25,7 @@ class TurnResult:
 
 
 def _cloud_mcp_hint(env: "AppEnv", mcp_servers: dict[str, Any], message: str) -> str | None:
-    if env.CURSOR_RUNTIME != "cloud":
+    if env.AI_PROVIDER != "cursor" or env.CURSOR_RUNTIME != "cloud":
         return None
     m = message.lower()
     if "validation" not in m and "invalid_argument" not in m:
@@ -58,14 +60,14 @@ async def run_cursor_turn(
     try:
         send_opts = {"mcp_servers": mcp_servers} if mcp_servers else None
         run = await agent.send(user_text, send_opts)
-    except CursorAgentError as e:
+    except Exception as e:
         log.error(
-            "Cursor agent failed to start run",
+            "Agent failed to start run",
             err=str(e),
             code=getattr(e, "code", None),
             isRetryable=getattr(e, "is_retryable", None),
         )
-        detail = f"Cursor could not start: {e}"
+        detail = f"Agent could not start: {e}"
         hint = _cloud_mcp_hint(env, mcp_servers, str(e))
         if hint:
             detail += f"\n\n{hint}"

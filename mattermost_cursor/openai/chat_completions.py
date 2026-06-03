@@ -9,6 +9,7 @@ from aiohttp import web
 
 from ..cursor.agent_context import augment_user_message_for_plugin
 from ..cursor.stream_sink import TextBufferSink, dispatch_stream_event
+from ..provider import active_model
 from .messages import last_user_message, system_instructions
 from .sse import sse_chunk, sse_role_chunk, write_sse_chunk, write_sse_done
 
@@ -41,7 +42,7 @@ async def handle_chat_completions(
             {"error": {"message": "No user message in request"}}, status=400
         )
 
-    model = body.get("model") or env.CURSOR_MODEL
+    model = body.get("model") or active_model(env)
     session_key = (body.get("user") or "").strip() or "default"
     user_id = session_key
     session = await sessions.get(session_key)

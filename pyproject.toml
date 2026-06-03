@@ -1,12 +1,13 @@
 [project]
 name = "mattermost-cursor"
 version = "1.0.0"
-description = "Mattermost bot that runs Cursor agents with GitLab, Jira, Confluence, and optional Figma MCP"
+description = "Mattermost bot that runs Cursor or Claude agents with GitLab, Jira, Confluence, and optional Figma MCP"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "ISC" }
 dependencies = [
     "cursor-sdk>=0.1.6",
+    "claude-agent-sdk>=0.2.88",
     "aiohttp>=3.10",
     "pydantic>=2.7",
     "pydantic-settings>=2.3",

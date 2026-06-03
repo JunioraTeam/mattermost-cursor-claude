@@ -1,17 +1,16 @@
 """OpenAI-compatible HTTP API for mattermost-plugin-agents (port of openai/server.ts)."""
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from aiohttp import web
 
+from ..provider import active_model
 from ..util.server import ServerHandle, start_app
 from .chat_completions import handle_chat_completions
 from .sessions import OpenAISessionPool
 
 if TYPE_CHECKING:
-    from cursor_sdk import AsyncClient
-
     from ..approval.manager import ApprovalManager
     from ..config import AppEnv
     from ..history.store import HistoryStore
@@ -31,7 +30,7 @@ async def start_openai_api_server(
     log: "Logger",
     approvals: "ApprovalManager",
     history: "HistoryStore",
-    client: "AsyncClient",
+    client: Any,
 ) -> ServerHandle:
     sessions = OpenAISessionPool(env, log, client)
 
@@ -50,10 +49,10 @@ async def start_openai_api_server(
                 "object": "list",
                 "data": [
                     {
-                        "id": env.CURSOR_MODEL,
+                        "id": active_model(env),
                         "object": "model",
                         "created": 0,
-                        "owned_by": "cursor",
+                        "owned_by": env.AI_PROVIDER,
                     }
                 ],
             }
@@ -85,6 +84,7 @@ async def start_openai_api_server(
     log.info(
         "OpenAI-compatible API listening (for mattermost-plugin-agents)",
         port=env.OPENAI_API_PORT,
-        model=env.CURSOR_MODEL,
+        provider=env.AI_PROVIDER,
+        model=active_model(env),
     )
     return handle
