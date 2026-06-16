@@ -13,7 +13,7 @@ from .sessions import OpenAISessionPool
 if TYPE_CHECKING:
     from ..approval.manager import ApprovalManager
     from ..config import AppEnv
-    from ..history.store import HistoryStore
+    from ..history.base import HistoryStore
     from ..util.logger import Logger
 
 

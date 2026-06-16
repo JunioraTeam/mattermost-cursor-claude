@@ -97,8 +97,12 @@ def build_agent_options(env: "AppEnv", log: "Logger") -> dict[str, Any]:
 
 
 async def create_cursor_agent(
-    env: "AppEnv", log: "Logger", client: "AsyncClient",
+    env: "AppEnv", log: "Logger", client: "AsyncClient", resume: str | None = None,
 ) -> tuple[AsyncAgent, dict[str, Any]]:
+    # ``resume`` accepted for provider parity; Cursor SDK resume is not wired
+    # yet, so a stored token is a no-op here (best-effort — see provider.py).
+    if resume:
+        log.info("Cursor resume requested but not supported; starting fresh agent")
     opts = build_agent_options(env, log)
     agent = await AsyncAgent.create(opts, client=client)
     mcp_servers: dict[str, Any] = opts.get("mcp_servers") or {}

@@ -1,10 +1,17 @@
-"""In-memory run + user activity store (port of history/store.ts)."""
+"""In-memory run + user activity store (port of history/store.ts).
+
+Default backend when ``DB_TYPE=memory``. Methods are ``async`` to satisfy the
+:class:`~mattermost_cursor.history.base.HistoryStore` interface; the bodies are
+synchronous (no I/O). ``_now`` / ``_truncate`` and the caps are shared with the
+SQL backend so truncation rules never drift.
+"""
 from __future__ import annotations
 
 import re
 import uuid
 from datetime import datetime, timezone
 
+from .base import HistoryStore
 from .types import RunRecord, RunSource, RunStatus, UserEvent, UserEventType, UserRecord
 
 MAX_RUNS = 500
@@ -23,12 +30,13 @@ def _truncate(text: str, max_len: int) -> str:
     return f"{t[: max_len - 1]}…"
 
 
-class HistoryStore:
+class InMemoryHistoryStore(HistoryStore):
     def __init__(self) -> None:
         self._runs: list[RunRecord] = []
         self._users: dict[str, UserRecord] = {}
+        self._thread_sessions: dict[str, dict] = {}
 
-    def start_run(
+    async def start_run(
         self,
         *,
         source: RunSource,
@@ -58,7 +66,7 @@ class HistoryStore:
             del self._runs[MAX_RUNS:]
         return run_id
 
-    def update_run(
+    async def update_run(
         self,
         run_id: str,
         *,
@@ -82,7 +90,7 @@ class HistoryStore:
         if username is not None:
             run.username = username
 
-    def finish_run(
+    async def finish_run(
         self, run_id: str, *, ok: bool, detail: str, status: RunStatus | None = None,
     ) -> None:
         run = next((r for r in self._runs if r.id == run_id), None)
@@ -95,7 +103,7 @@ class HistoryStore:
             "completed" if ok else "cancelled" if detail == "cancelled" else "error"
         )
 
-    def record_user_event(
+    async def record_user_event(
         self,
         *,
         userId: str,
@@ -134,7 +142,7 @@ class HistoryStore:
         if len(user.events) > MAX_EVENTS_PER_USER:
             del user.events[MAX_EVENTS_PER_USER:]
 
-    def cancel_queued_by_queue_id(self, queue_id: str) -> bool:
+    async def cancel_queued_by_queue_id(self, queue_id: str) -> bool:
         run = next(
             (r for r in self._runs if r.queueId == queue_id and r.status == "queued"), None
         )
@@ -146,7 +154,7 @@ class HistoryStore:
         run.detail = "removed from queue"
         return True
 
-    def cancel_all_queued(self) -> int:
+    async def cancel_all_queued(self) -> int:
         n = 0
         for run in self._runs:
             if run.status != "queued":
@@ -158,13 +166,43 @@ class HistoryStore:
             n += 1
         return n
 
-    def list_runs(self, limit: int = 100) -> list[dict]:
+    async def list_runs(self, limit: int = 100) -> list[dict]:
         return [r.to_dict() for r in self._runs[:limit]]
 
-    def list_users(self) -> list[dict]:
+    async def list_users(self) -> list[dict]:
         users = sorted(
             self._users.values(),
             key=lambda u: u.lastSeenAt,
             reverse=True,
         )
         return [u.to_dict() for u in users]
+
+    # --- agent resume tokens ------------------------------------------------
+
+    async def get_thread_session(self, thread_key: str) -> dict | None:
+        return self._thread_sessions.get(thread_key)
+
+    async def save_thread_session(
+        self,
+        *,
+        thread_key: str,
+        provider: str,
+        resume_token: str,
+        model: str | None = None,
+    ) -> None:
+        now = _now()
+        existing = self._thread_sessions.get(thread_key)
+        self._thread_sessions[thread_key] = {
+            "threadKey": thread_key,
+            "provider": provider,
+            "resumeToken": resume_token,
+            "model": model,
+            "createdAt": existing["createdAt"] if existing else now,
+            "updatedAt": now,
+        }
+
+    async def delete_thread_session(self, thread_key: str) -> None:
+        self._thread_sessions.pop(thread_key, None)
+
+    async def aclose(self) -> None:
+        return

@@ -12,7 +12,7 @@ from .approval.manager import ApprovalManager
 from .bot.app import CursorMattermostBot
 from .config import load_env
 from .provider import create_client
-from .history.store import HistoryStore
+from .history.factory import create_history_store
 from .mattermost.types import MattermostPost
 from .mattermost.websocket import MattermostWebSocket
 from .openai.server import start_openai_api_server
@@ -34,7 +34,7 @@ async def _run() -> None:
     env = load_env()
     log = create_logger(env.LOG_LEVEL)
     approvals = ApprovalManager(log)
-    history = HistoryStore()
+    history = await create_history_store(env, log)
 
     run_standalone = env.BOT_MODE in ("standalone", "both")
     run_openai = env.BOT_MODE in ("openai", "both")
@@ -97,6 +97,10 @@ async def _run() -> None:
             await bot.aclose()
         try:
             await client.aclose()
+        except Exception:
+            pass
+        try:
+            await history.aclose()
         except Exception:
             pass
         stop_event.set()

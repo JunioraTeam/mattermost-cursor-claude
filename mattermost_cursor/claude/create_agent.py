@@ -43,7 +43,9 @@ def _system_prompt(env: "AppEnv") -> Any:
     return appended or None
 
 
-def build_claude_options(env: "AppEnv", log: "Logger") -> ClaudeAgentOptions:
+def build_claude_options(
+    env: "AppEnv", log: "Logger", resume: str | None = None,
+) -> ClaudeAgentOptions:
     mcp_servers = _normalize_mcp_servers(build_mcp_servers(env, log))
 
     proc_env: dict[str, str] = {}
@@ -62,13 +64,19 @@ def build_claude_options(env: "AppEnv", log: "Logger") -> ClaudeAgentOptions:
     )
     if env.CLAUDE_MAX_TURNS:
         opts.max_turns = env.CLAUDE_MAX_TURNS
+    # Resume a prior conversation by session id (persisted per Mattermost thread).
+    # The SDK loads the transcript from its local session store; if that file is
+    # gone (e.g. a fresh container) resume is a no-op and the bot's per-turn
+    # thread re-feed still rebuilds context.
+    if resume:
+        opts.resume = resume
     return opts
 
 
 async def create_claude_agent(
-    env: "AppEnv", log: "Logger", client: "ClaudeClient",
+    env: "AppEnv", log: "Logger", client: "ClaudeClient", resume: str | None = None,
 ) -> tuple[ClaudeAgentSession, dict[str, Any]]:
-    opts = build_claude_options(env, log)
+    opts = build_claude_options(env, log, resume=resume)
     session = ClaudeAgentSession(opts, log)
     await session.connect()
     mcp_servers: dict[str, Any] = dict(opts.mcp_servers) if isinstance(opts.mcp_servers, dict) else {}
@@ -77,5 +85,6 @@ async def create_claude_agent(
         model=env.CLAUDE_MODEL,
         permission_mode=env.CLAUDE_PERMISSION_MODE,
         mcp=list(mcp_servers.keys()),
+        resumed=bool(resume),
     )
     return session, mcp_servers

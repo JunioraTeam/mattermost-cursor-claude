@@ -22,7 +22,7 @@ from .thread_queue import QueuedRun, ThreadRunQueue, new_queue_id
 if TYPE_CHECKING:
     from ..approval.manager import ApprovalManager
     from ..config import AppEnv
-    from ..history.store import HistoryStore
+    from ..history.base import HistoryStore
     from ..util.logger import Logger
 
 
@@ -144,7 +144,7 @@ class CursorMattermostBot:
 
         username = await self._resolve_username(post.user_id)
         queue_id = new_queue_id()
-        history_run_id = self._history.start_run(
+        history_run_id = await self._history.start_run(
             source="mattermost",
             userId=post.user_id,
             username=username,
@@ -189,7 +189,7 @@ class CursorMattermostBot:
 
         if cmd.kind == "queue":
             n = session.run_queue.cancel_all()
-            cancelled = self._history.cancel_all_queued()
+            cancelled = await self._history.cancel_all_queued()
             if n:
                 message = f"Removed {n} queued message(s)."
             elif cancelled:
@@ -199,7 +199,7 @@ class CursorMattermostBot:
         elif cmd.kind == "id":
             removed = session.run_queue.cancel(cmd.id)
             if removed:
-                self._history.cancel_queued_by_queue_id(cmd.id)
+                await self._history.cancel_queued_by_queue_id(cmd.id)
             message = (
                 f"Removed queued message `{cmd.id}`."
                 if removed
@@ -263,7 +263,7 @@ class CursorMattermostBot:
         self, post: MattermostPost, event_type: str, preview: str, username: str | None = None
     ) -> None:
         name = username if username is not None else await self._resolve_username(post.user_id)
-        self._history.record_user_event(
+        await self._history.record_user_event(
             userId=post.user_id,
             username=name,
             type=event_type,
@@ -282,7 +282,7 @@ class CursorMattermostBot:
 
     async def _process_queued_run(self, session: ThreadSession, item: QueuedRun) -> None:
         post = item.post
-        self._history.update_run(item.history_run_id, status="running")
+        await self._history.update_run(item.history_run_id, status="running")
         user_text = await build_user_message_with_thread_context(
             api=self._api,
             post=post,
@@ -300,10 +300,10 @@ class CursorMattermostBot:
                 root_id=root_for_reply,
                 props={"from_bot": "cursor", "queue_id": item.id},
             )
-            self._history.update_run(item.history_run_id, replyPostId=reply.id)
+            await self._history.update_run(item.history_run_id, replyPostId=reply.id)
         except Exception as e:
             self._log.error("Failed to create reply post", err=str(e), queueId=item.id)
-            self._history.finish_run(
+            await self._history.finish_run(
                 item.history_run_id, ok=False, detail="Failed to create reply post"
             )
             return
@@ -317,10 +317,13 @@ class CursorMattermostBot:
 
         session.current_run = None
         result = None
+        captured_run: Any = None
         try:
-            def on_run_started(run: Any) -> None:
+            async def on_run_started(run: Any) -> None:
+                nonlocal captured_run
+                captured_run = run
                 session.current_run = run
-                self._history.update_run(
+                await self._history.update_run(
                     item.history_run_id,
                     cursorRunId=run.run_id,
                     agentId=getattr(run, "agent_id", None),
@@ -337,6 +340,7 @@ class CursorMattermostBot:
                 on_run_started=on_run_started,
             )
             await streamer.close(None if result.ok else f"_{result.detail}_")
+            await self._persist_resume_token(post, captured_run, result.ok)
         except Exception as e:
             self._log.error("run_cursor_turn failed", err=str(e), queueId=item.id)
             result = type("R", (), {"ok": False, "detail": str(e)})()
@@ -344,12 +348,35 @@ class CursorMattermostBot:
         finally:
             session.current_run = None
             if result is not None:
-                self._history.finish_run(
+                await self._history.finish_run(
                     item.history_run_id,
                     ok=result.ok,
                     detail=result.detail,
                     status="cancelled" if result.detail == "cancelled" else None,
                 )
+
+    async def _persist_resume_token(
+        self, post: MattermostPost, run: Any, ok: bool
+    ) -> None:
+        """Save the provider's session id so this thread resumes after a restart.
+
+        The run's session id is only populated once messages have streamed, so
+        this runs after the turn completes (not in on_run_started).
+        """
+        if not ok or self._env.AI_PROVIDER != "claude":
+            return
+        token = getattr(run, "agent_id", None)
+        if not token:
+            return
+        try:
+            await self._history.save_thread_session(
+                thread_key=_thread_key(post.channel_id, post),
+                provider="claude",
+                resume_token=token,
+                model=self._env.CLAUDE_MODEL,
+            )
+        except Exception as e:
+            self._log.error("Failed to persist resume token", err=str(e))
 
     async def _safe_get_channel(self, channel_id: str) -> dict | None:
         try:
@@ -377,12 +404,16 @@ class CursorMattermostBot:
         except Exception:
             pass
         self._sessions.pop(key, None)
+        try:
+            await self._history.delete_thread_session(key)
+        except Exception:
+            pass
 
     async def _get_or_create_session(self, key: str) -> ThreadSession:
         s = self._sessions.get(key)
         if s:
             return s
-        agent, mcp_servers = await create_agent(self._env, self._log, self._client)
+        agent, mcp_servers = await self._create_agent_for_thread(key)
         s = ThreadSession(
             agent=agent,
             mcp_servers=mcp_servers,
@@ -391,3 +422,32 @@ class CursorMattermostBot:
         )
         self._sessions[key] = s
         return s
+
+    async def _create_agent_for_thread(self, key: str) -> tuple[Any, dict[str, Any]]:
+        """Create an agent, resuming from a persisted session token if one exists.
+
+        Only the first sighting of a thread after a restart hits the store
+        (sessions are cached in ``self._sessions`` for the process lifetime). If
+        resume fails (stale/missing local session file), drop the token and start
+        fresh — the per-turn Mattermost transcript re-feed still rebuilds context.
+        """
+        resume: str | None = None
+        if self._env.AI_PROVIDER == "claude":
+            try:
+                saved = await self._history.get_thread_session(key)
+            except Exception as e:
+                self._log.error("Failed to read thread session", err=str(e))
+                saved = None
+            if saved and saved.get("provider") == "claude":
+                resume = saved.get("resumeToken")
+
+        try:
+            return await create_agent(self._env, self._log, self._client, resume=resume)
+        except Exception as e:
+            if resume:
+                self._log.error(
+                    "Resume failed; starting fresh agent", key=key, err=str(e)
+                )
+                await self._history.delete_thread_session(key)
+                return await create_agent(self._env, self._log, self._client)
+            raise

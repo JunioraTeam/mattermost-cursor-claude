@@ -22,13 +22,13 @@ async def create_client(env: "AppEnv", log: "Logger") -> Any:
 
 
 async def create_agent(
-    env: "AppEnv", log: "Logger", client: Any,
+    env: "AppEnv", log: "Logger", client: Any, resume: str | None = None,
 ) -> tuple[Any, dict[str, Any]]:
     if env.AI_PROVIDER == "claude":
         from .claude.create_agent import create_claude_agent
-        return await create_claude_agent(env, log, client)
+        return await create_claude_agent(env, log, client, resume=resume)
     from .cursor.create_agent import create_cursor_agent
-    return await create_cursor_agent(env, log, client)
+    return await create_cursor_agent(env, log, client, resume=resume)
 
 
 def active_model(env: "AppEnv") -> str:

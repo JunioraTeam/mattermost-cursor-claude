@@ -17,7 +17,7 @@ from .ui import PANEL_HTML
 
 if TYPE_CHECKING:
     from ..config import AppEnv
-    from ..history.store import HistoryStore
+    from ..history.base import HistoryStore
     from ..util.logger import Logger
 
 
@@ -74,12 +74,12 @@ async def start_panel_server(
     async def api_runs(request: web.Request) -> web.Response:
         if not _is_authed(request, env):
             return web.json_response({"error": "unauthorized"}, status=401)
-        return web.json_response(history.list_runs(200))
+        return web.json_response(await history.list_runs(200))
 
     async def api_users(request: web.Request) -> web.Response:
         if not _is_authed(request, env):
             return web.json_response({"error": "unauthorized"}, status=401)
-        return web.json_response(history.list_users())
+        return web.json_response(await history.list_users())
 
     app = web.Application()
     app.router.add_get("/health", health)

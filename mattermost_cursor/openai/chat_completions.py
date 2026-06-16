@@ -16,7 +16,7 @@ from .sse import sse_chunk, sse_role_chunk, write_sse_chunk, write_sse_done
 if TYPE_CHECKING:
     from ..approval.manager import ApprovalManager
     from ..config import AppEnv
-    from ..history.store import HistoryStore
+    from ..history.base import HistoryStore
     from ..util.logger import Logger
     from .sessions import OpenAISessionPool
 
@@ -49,14 +49,14 @@ async def handle_chat_completions(
     agent, mcp_servers = session.agent, session.mcp_servers
     prompt = augment_user_message_for_plugin(env, user_text, system_instructions(messages))
 
-    history.record_user_event(
+    await history.record_user_event(
         userId=user_id,
         username=session_key if session_key != "default" else None,
         type="message",
         preview=user_text,
     )
 
-    history_id = history.start_run(
+    history_id = await history.start_run(
         source="openai",
         userId=user_id,
         username=session_key if session_key != "default" else None,
@@ -66,11 +66,11 @@ async def handle_chat_completions(
     try:
         send_opts = {"mcp_servers": mcp_servers} if mcp_servers else None
         run = await agent.send(prompt, send_opts)
-        history.update_run(
+        await history.update_run(
             history_id, cursorRunId=run.run_id, agentId=getattr(run, "agent_id", None)
         )
     except Exception as e:
-        history.finish_run(history_id, ok=False, detail=str(e))
+        await history.finish_run(history_id, ok=False, detail=str(e))
         return web.json_response({"error": {"message": str(e)}}, status=502)
 
     completion_id = f"chatcmpl-{run.run_id}"
@@ -101,7 +101,7 @@ async def handle_chat_completions(
         finally:
             await sink.clear_transient_run_status()
         result = await run.wait()
-        history.finish_run(
+        await history.finish_run(
             history_id,
             ok=result.status not in ("error", "cancelled"),
             detail=result.result or result.status,
@@ -162,7 +162,7 @@ async def handle_chat_completions(
                 auto_approve_requests=auto_approve,
             )
         result = await run.wait()
-        history.finish_run(
+        await history.finish_run(
             history_id,
             ok=result.status not in ("error", "cancelled"),
             detail=result.result or result.status,
@@ -180,7 +180,7 @@ async def handle_chat_completions(
             await sink.append(f"\n\n**Git / MR:**\n{lines}\n")
     except Exception as e:
         log.error("OpenAI stream error", err=str(e))
-        history.finish_run(history_id, ok=False, detail=str(e))
+        await history.finish_run(history_id, ok=False, detail=str(e))
         await sink.append(f"\n\n_Stream error: {e}_\n")
     finally:
         await sink.clear_transient_run_status()

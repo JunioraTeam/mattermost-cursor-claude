@@ -6,11 +6,14 @@ code reads ``env.CURSOR_MODEL`` exactly like the TypeScript original.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from dotenv import load_dotenv
 from pydantic import ValidationError, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+if TYPE_CHECKING:
+    from sqlalchemy import URL
 
 _TRUE = {"1", "true", "yes", "on"}
 _FALSE = {"0", "false", "no", "off"}
@@ -121,6 +124,17 @@ class AppEnv(BaseSettings):
     PANEL_PASSWORD: str | None = None
     PANEL_SECRET: str | None = None
 
+    # Persistence — memory (default, no persistence) | mariadb | mysql | postgres | sqlite.
+    # Discrete vars are assembled into a SQLAlchemy URL by database_url().
+    DB_TYPE: Literal["memory", "mariadb", "mysql", "postgres", "sqlite"] = "memory"
+    DB_HOST: str | None = None
+    DB_PORT: int | None = None
+    DB_USER: str | None = None
+    DB_PASSWORD: str | None = None
+    DB_NAME: str | None = None
+    DB_SQLITE_PATH: str | None = None
+    DB_ECHO: bool = False
+
     @field_validator(
         "MATTERMOST_REQUIRE_MENTION",
         "CURSOR_CLOUD_AUTO_CREATE_MR",
@@ -128,6 +142,7 @@ class AppEnv(BaseSettings):
         "CURSOR_AUTO_APPROVE_REQUESTS",
         "CLAUDE_SYSTEM_PROMPT_PRESET",
         "MCP_MERGE_PRESETS",
+        "DB_ECHO",
         mode="before",
     )
     @classmethod
@@ -163,9 +178,52 @@ class AppEnv(BaseSettings):
                 issues.append("PANEL_USERNAME: PANEL_USERNAME is required when PANEL_PORT > 0")
             if not (self.PANEL_PASSWORD or "").strip():
                 issues.append("PANEL_PASSWORD: PANEL_PASSWORD is required when PANEL_PORT > 0")
+        if self.DB_TYPE in ("mariadb", "mysql", "postgres"):
+            for var in ("DB_HOST", "DB_NAME", "DB_USER"):
+                if not (getattr(self, var) or "").strip():
+                    issues.append(f"{var}: {var} is required when DB_TYPE={self.DB_TYPE}")
+        elif self.DB_TYPE == "sqlite":
+            if not (self.DB_SQLITE_PATH or "").strip():
+                issues.append(
+                    "DB_SQLITE_PATH: DB_SQLITE_PATH is required when DB_TYPE=sqlite"
+                )
         if issues:
             raise ValueError("\n".join(issues))
         return self
+
+    def database_url(self) -> "URL | None":
+        """Build a SQLAlchemy async URL from the discrete DB_* vars.
+
+        Returns ``None`` for ``DB_TYPE=memory`` (use the in-memory store).
+        """
+        if self.DB_TYPE == "memory":
+            return None
+
+        from sqlalchemy import URL
+
+        if self.DB_TYPE == "sqlite":
+            return URL.create("sqlite+aiosqlite", database=self.DB_SQLITE_PATH)
+
+        if self.DB_TYPE in ("mariadb", "mysql"):
+            return URL.create(
+                "mysql+asyncmy",
+                username=self.DB_USER,
+                password=self.DB_PASSWORD,
+                host=self.DB_HOST,
+                port=self.DB_PORT or 3306,
+                database=self.DB_NAME,
+                query={"charset": "utf8mb4"},
+            )
+
+        # postgres
+        return URL.create(
+            "postgresql+asyncpg",
+            username=self.DB_USER,
+            password=self.DB_PASSWORD,
+            host=self.DB_HOST,
+            port=self.DB_PORT or 5432,
+            database=self.DB_NAME,
+        )
 
 
 def load_env() -> AppEnv:

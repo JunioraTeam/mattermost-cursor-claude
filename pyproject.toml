@@ -13,7 +13,13 @@ dependencies = [
     "pydantic-settings>=2.3",
     "python-dotenv>=1.0",
     "structlog>=24.1",
+    "sqlalchemy[asyncio]>=2.0",
+    "asyncmy>=0.2.9",
+    "aiosqlite>=0.20",
 ]
+
+[project.optional-dependencies]
+postgres = ["asyncpg>=0.29"]
 
 [project.scripts]
 mattermost-cursor = "mattermost_cursor.__main__:main"
