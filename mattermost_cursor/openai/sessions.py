@@ -51,6 +51,19 @@ class OpenAISessionPool:
                 asyncio.ensure_future(self._dispose(s.agent))
                 del self._sessions[key]
 
+    async def create_agent_once(self) -> tuple[Any, dict[str, Any]]:
+        """A fresh, uncached agent for one stateless request.
+
+        The OpenAI/Responses path re-feeds the full transcript every call, so it
+        does not reuse a persistent conversation — a per-request agent avoids
+        cross-thread bleed and concurrent-request interleaving on a shared session.
+        Caller must ``dispose()`` it when the run finishes.
+        """
+        return await create_agent(self._env, self._log, self._client)
+
+    async def dispose(self, agent: Any) -> None:
+        await self._dispose(agent)
+
     async def _dispose(self, agent: Any) -> None:
         try:
             await agent.close()
