@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM python:3.12-bookworm-slim
+FROM python:3.12-slim-bookworm
 
 WORKDIR /app
 
@@ -13,12 +13,12 @@ WORKDIR /app
 RUN apt-get update \
   && apt-get install -y --no-install-recommends curl ca-certificates git nodejs npm \
   && rm -rf /var/lib/apt/lists/* \
-  && curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local sh
+  && curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
 ENV PATH="/usr/local/bin:${PATH}"
 ENV UV_LINK_MODE=copy
 
 # Install dependencies first (cached layer), then the package.
-COPY pyproject.toml ./
+COPY pyproject.toml README.md ./
 COPY mattermost_cursor ./mattermost_cursor
 RUN uv sync --no-dev
 
