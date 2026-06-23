@@ -35,6 +35,29 @@ async def start_openai_api_server(
     sessions = OpenAISessionPool(env, log, client)
 
     @web.middleware
+    async def log_mw(request: web.Request, handler):
+        # Logs every request — including unmatched routes (aiohttp wraps the
+        # 404 handler in middlewares) — so a bifrost call to a path we don't
+        # serve (e.g. /v1/responses) is visible instead of silently 404ing.
+        try:
+            resp = await handler(request)
+            log.info(
+                "OpenAI API request",
+                method=request.method,
+                path=request.rel_url.path_qs,
+                status=resp.status,
+            )
+            return resp
+        except web.HTTPException as e:
+            log.info(
+                "OpenAI API request",
+                method=request.method,
+                path=request.rel_url.path_qs,
+                status=e.status,
+            )
+            raise
+
+    @web.middleware
     async def auth_mw(request: web.Request, handler):
         if not _check_auth(request, env):
             return web.json_response({"error": {"message": "Invalid API key"}}, status=401)
@@ -72,7 +95,7 @@ async def start_openai_api_server(
             log.error("chat/completions failed", err=str(e))
             return web.json_response({"error": {"message": str(e)}}, status=500)
 
-    app = web.Application(middlewares=[auth_mw])
+    app = web.Application(middlewares=[log_mw, auth_mw])
     app.router.add_get("/health", health)
     app.router.add_get("/v1/health", health)
     app.router.add_get("/models", models)
