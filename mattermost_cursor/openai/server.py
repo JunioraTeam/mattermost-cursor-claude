@@ -8,6 +8,7 @@ from aiohttp import web
 from ..provider import active_model
 from ..util.server import ServerHandle, start_app
 from .chat_completions import handle_chat_completions
+from .responses import handle_responses
 from .sessions import OpenAISessionPool
 
 if TYPE_CHECKING:
@@ -95,6 +96,20 @@ async def start_openai_api_server(
             log.error("chat/completions failed", err=str(e))
             return web.json_response({"error": {"message": str(e)}}, status=500)
 
+    async def responses(request: web.Request) -> web.StreamResponse:
+        try:
+            return await handle_responses(
+                request,
+                env=env,
+                log=log,
+                sessions=sessions,
+                approvals=approvals,
+                history=history,
+            )
+        except Exception as e:
+            log.error("responses failed", err=str(e))
+            return web.json_response({"error": {"message": str(e)}}, status=500)
+
     app = web.Application(middlewares=[log_mw, auth_mw])
     app.router.add_get("/health", health)
     app.router.add_get("/v1/health", health)
@@ -102,6 +117,8 @@ async def start_openai_api_server(
     app.router.add_get("/v1/models", models)
     app.router.add_post("/chat/completions", chat)
     app.router.add_post("/v1/chat/completions", chat)
+    app.router.add_post("/responses", responses)
+    app.router.add_post("/v1/responses", responses)
 
     handle = await start_app(app, env.OPENAI_API_PORT)
     log.info(
