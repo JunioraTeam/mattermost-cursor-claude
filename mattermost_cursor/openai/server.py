@@ -121,6 +121,7 @@ async def start_openai_api_server(
     app.router.add_post("/v1/responses", responses)
 
     handle = await start_app(app, env.OPENAI_API_PORT)
+    sessions.start_warming()
     log.info(
         "OpenAI-compatible API listening (for mattermost-plugin-agents)",
         port=env.OPENAI_API_PORT,
